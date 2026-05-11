@@ -38,6 +38,8 @@ import {
   calculateEnglishAnnual, 
   isDataComplete 
 } from './utils/calculations';
+import { submitResult } from './services/firebaseService';
+import StatsDashboard from './components/StatsDashboard';
 
 export default function App() {
   const [state, setState] = useState<OrientationState>(() => {
@@ -124,6 +126,31 @@ export default function App() {
     return { mo, bilanLettres, bilanSciences, serie, admisibleOfficiel, admissiblePrive, subResults };
   })() : null;
 
+  // Track results submission once they are complete
+  useEffect(() => {
+    if (results && activeTab === 'results') {
+      const submissionData = {
+        studentName: state.info.nom,
+        matricule: state.info.matricule,
+        school: state.info.etablissement,
+        mga: state.info.mgaAnnuelle,
+        mo: results.mo,
+        serie: results.serie,
+        admissiblePublic: results.admisibleOfficiel,
+        admissiblePrive: results.admissiblePrive,
+      };
+      
+      // We use a small delay or a check to avoid double submission
+      const lastSubmitted = sessionStorage.getItem('last_submitted_id');
+      const currentId = `${state.info.nom}-${state.info.matricule}-${results.mo.toFixed(2)}`;
+      
+      if (lastSubmitted !== currentId) {
+        submitResult(submissionData);
+        sessionStorage.setItem('last_submitted_id', currentId);
+      }
+    }
+  }, [activeTab, results]);
+
   const updateInfo = (field: keyof StudentInfo, value: any) => {
     setState(prev => ({ ...prev, info: { ...prev.info, [field]: value } }));
   };
@@ -167,6 +194,7 @@ export default function App() {
               { id: 'details', label: 'Détails du Calcul', icon: Info },
               { id: 'guide', label: 'Mode d\'emploi', icon: GraduationCap },
               { id: 'settings', label: 'Paramètres', icon: Settings },
+              { id: 'admin', label: 'Tableau de Bord', icon: BarChart3 },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -177,7 +205,9 @@ export default function App() {
                     : 'text-slate-500 hover:bg-slate-100'
                 }`}
               >
-                <tab.icon size={20} />
+                <div className={tab.id === 'admin' ? 'text-ivory-green' : ''}>
+                  <tab.icon size={20} />
+                </div>
                 <span className="font-semibold text-sm">{tab.label}</span>
               </button>
             ))}
@@ -226,7 +256,7 @@ export default function App() {
                   Préparez votre <span className="text-transparent bg-clip-text bg-gradient-to-r from-ivory-orange to-orange-400">Orientation</span> en Seconde
                 </h2>
                 <p className="text-lg text-slate-500 max-w-2xl mx-auto">
-                  Saisissez vos notes de classe et de BEPC pour estimer votre orientation après la 3ème selon les critères du ministère.
+                  Saisissez vos notes de classe et de BEPC pour estimer votre orientation après la 3ème selon les critères en vigueur au ministère.
                 </p>
               </div>
 
@@ -546,8 +576,8 @@ export default function App() {
                           <p className="font-bold text-slate-800">Avis d'Orientation</p>
                           <p className="text-sm text-slate-500">
                             {results.admisibleOfficiel 
-                              ? "Admissible en Seconde (Public)" 
-                              : (results.admissiblePrive ? "Admissible Privé Uniquement" : "Non Orientable")}
+                               ? "Admissible en Seconde (Public)" 
+                               : (results.admissiblePrive ? "Admissible Privé Uniquement" : "Non Orientable")}
                           </p>
                         </div>
                       </div>
@@ -742,6 +772,23 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'admin' && (
+            <motion.div 
+              key="admin"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-6"
+            >
+              <div className="flex items-center gap-4 mb-2">
+                <div className="p-3 bg-green-50 text-ivory-green rounded-2xl">
+                  <BarChart3 size={24} />
+                </div>
+                <h3 className="text-2xl font-bold text-slate-800">Données & Statistiques</h3>
+              </div>
+              <StatsDashboard />
             </motion.div>
           )}
 

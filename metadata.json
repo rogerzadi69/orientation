@@ -1,6 +1,6 @@
 {
   "name": "Orientation Seconde CI",
-  "description": "Calculateur officiel de moyenne d'orientation pour les élèves de 3ème en Côte d'Ivoire.",
+  "description": "Calculateur d'orientation Seconde (Kirmann) avec suivi des statistiques et sauvegarde des résultats pour le Collège Kirmann.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

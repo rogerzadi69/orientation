@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "submission": {
+      "title": "Student Orientation Result",
+      "description": "Stored orientation data for students",
+      "type": "object",
+      "properties": {
+        "studentName": { "type": "string" },
+        "matricule": { "type": "string" },
+        "school": { "type": "string" },
+        "mga": { "type": "number" },
+        "mo": { "type": "number" },
+        "serie": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "admissiblePublic": { "type": "boolean" },
+        "admissiblePrive": { "type": "boolean" }
+      },
+      "required": ["studentName", "mo", "timestamp"]
+    },
+    "stats": {
+      "title": "Application Statistics",
+      "description": "Usage counters",
+      "type": "object",
+      "properties": {
+        "totalCalculations": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "submissions": {
+      "schema": "submission",
+      "description": "Collection of student results"
+    },
+    "metadata": {
+      "schema": "stats",
+      "description": "Metadata and counters"
+    }
+  }
+}
