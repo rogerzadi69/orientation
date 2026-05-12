@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { 
+      return isSignedIn() && 
+             (request.auth.token.email.lower() == 'doizylet@gmail.com'); 
+    }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    
+    // Default rules for authenticated users (admins/collaborators)
+    match /{collection}/{docId} {
+      allow read, write, delete: if isSignedIn();
+    }
+
+    // Specific rules for public submissions
+    match /submissions/{docId} {
+      // Allow students to check uniqueness and submit their results even if not signed in
+      allow get, create, update: if true;
+    }
+  }
+}

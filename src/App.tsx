@@ -35,13 +35,23 @@ import {
 } from './constants';
 import { 
   calculateAnnualAverage, 
-  calculateEnglishAnnual, 
   isDataComplete 
 } from './utils/calculations';
-import { submitResult } from './services/firebaseService';
+import { 
+  submitResult, 
+  auth, 
+  db,
+  signInWithGoogle, 
+  signInWithEmail,
+  logout, 
+  ADMIN_EMAIL 
+} from './services/firebaseService';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import StatsDashboard from './components/StatsDashboard';
 
 export default function App() {
+  const [user, setUser] = useState<any>(null);
   const [state, setState] = useState<OrientationState>(() => {
     const saved = localStorage.getItem('orientation_seconde_data');
     if (saved) return JSON.parse(saved);
@@ -49,7 +59,40 @@ export default function App() {
   });
 
   const [activeTab, setActiveTab] = useState('home');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPass, setAdminPass] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Firebase Auth Listener
+  useEffect(() => {
+    if (!auth) return;
+    
+    // Test connection once
+    import('./services/firebaseService').then(m => m.testConnection());
+
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser && db) {
+        try {
+          // Small delay to ensure Firestore is fully initialized in some environments
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Track unique users in Firestore to provide the "total users" count the user requested
+          const userRef = doc(db, 'users', currentUser.uid);
+          await setDoc(userRef, {
+            email: currentUser.email,
+            displayName: currentUser.displayName,
+            lastLogin: serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.error("Error updating user record:", err);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
   // Persistence
   useEffect(() => {
@@ -57,16 +100,10 @@ export default function App() {
   }, [state]);
 
   const resetData = () => {
-    // Suppression de confirm() car il peut être bloqué dans l'iframe
     localStorage.removeItem('orientation_seconde_data');
+    sessionStorage.removeItem('last_submitted_id');
     setState(JSON.parse(JSON.stringify(INITIAL_STATE)));
     setActiveTab('home');
-  };
-
-  const saveLocally = () => {
-    localStorage.setItem('orientation_seconde_data', JSON.stringify(state));
-    setSaveStatus('saved');
-    setTimeout(() => setSaveStatus('idle'), 2000);
   };
 
   // Calculations
@@ -126,34 +163,67 @@ export default function App() {
     return { mo, bilanLettres, bilanSciences, serie, admisibleOfficiel, admissiblePrive, subResults };
   })() : null;
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionConflict, setSubmissionConflict] = useState<any>(null);
+
   // Track results submission once they are complete
   useEffect(() => {
-    if (results && activeTab === 'results') {
+    if (results && activeTab === 'results' && !isSubmitting) {
       const submissionData = {
         studentName: state.info.nom,
-        matricule: state.info.matricule,
+        matricule: state.info.matricule.trim().toUpperCase(),
         school: state.info.etablissement,
         mga: state.info.mgaAnnuelle,
+        typeCandidat: state.info.typeCandidat,
+        admisBEPC: state.info.admisBEPC,
+        anneeScolaire: state.info.anneeScolaire,
         mo: results.mo,
         serie: results.serie,
         admissiblePublic: results.admisibleOfficiel,
         admissiblePrive: results.admissiblePrive,
       };
       
-      // We use a small delay or a check to avoid double submission
       const lastSubmitted = sessionStorage.getItem('last_submitted_id');
       const currentId = `${state.info.nom}-${state.info.matricule}-${results.mo.toFixed(2)}`;
       
       if (lastSubmitted !== currentId) {
-        submitResult(submissionData);
-        sessionStorage.setItem('last_submitted_id', currentId);
+        setIsSubmitting(true);
+        submitResult(submissionData).then(res => {
+          if (res?.exists) {
+            setSubmissionConflict(submissionData);
+          } else if (res?.error) {
+            console.error("Erreur d'enregistrement critique:", res.error);
+            setIsSubmitting(false);
+          } else if (res?.success) {
+            console.log("Enregistrement réussi:", res.id);
+            sessionStorage.setItem('last_submitted_id', currentId);
+            setIsSubmitting(false);
+          }
+        }).catch(() => setIsSubmitting(false));
       }
     }
-  }, [activeTab, results]);
+  }, [activeTab, results, isSubmitting]);
+
+  const handleForceSubmit = async () => {
+    if (!submissionConflict) return;
+    setIsSubmitting(true);
+    const res = await submitResult(submissionConflict, true);
+    if (res?.success) {
+      const currentId = `${state.info.nom}-${state.info.matricule}-${results?.mo.toFixed(2)}`;
+      sessionStorage.setItem('last_submitted_id', currentId);
+      setSubmissionConflict(null);
+      alert("Vos anciennes données ont été écrasées avec succès.");
+    } else {
+      alert("Erreur lors de la mise à jour : " + (res?.error || "Inconnu"));
+    }
+    setIsSubmitting(false);
+  };
 
   const updateInfo = (field: keyof StudentInfo, value: any) => {
     setState(prev => ({ ...prev, info: { ...prev.info, [field]: value } }));
   };
+
+  const isMatriculeValid = (m: string) => /^[0-9]{8}[a-zA-Z]$/.test(m.trim());
 
   const updateNote = (subject: string, field: keyof SubjectData, value: string) => {
     const numValue = value === '' ? '' : Math.min(20, Math.max(0, parseFloat(value)));
@@ -166,8 +236,42 @@ export default function App() {
     }));
   };
 
+  const handleCalculate = () => {
+    if (!isDataComplete(state)) {
+      alert("Veuillez remplir toutes les informations obligatoires (Nom, Matricule, MGA et toutes les notes) avant de calculer.");
+      return;
+    }
+    setActiveTab('results');
+  };
+
   const updateThreshold = (field: keyof Thresholds, value: number) => {
     setState(prev => ({ ...prev, thresholds: { ...prev.thresholds, [field]: value } }));
+  };
+
+  const handleAdminLogin = async () => {
+    setAuthError(null);
+    if (!adminEmail || !adminPass) {
+      setAuthError("Veuillez saisir votre email et votre mot de passe.");
+      return;
+    }
+    
+    const { user, error } = await signInWithEmail(adminEmail, adminPass);
+    
+    if (error) {
+      if (error === 'auth/invalid-credential' || error === 'auth/wrong-password') {
+        setAuthError("Email ou mot de passe incorrect. Assurez-vous d'avoir bien créé le compte dans la console Firebase.");
+      } else if (error === 'auth/user-not-found') {
+        setAuthError("Cet utilisateur n'existe pas. Veuillez d'abord créer le compte pour ce collaborateur.");
+      } else if (error === 'auth/too-many-requests') {
+        setAuthError("Trop de tentatives infructueuses. Le compte est temporairement bloqué. Réessayez plus tard.");
+      } else {
+        setAuthError(`Erreur d'authentification : ${error}`);
+      }
+    } else if (user) {
+      setAdminEmail('');
+      setAdminPass('');
+      setAuthError(null);
+    }
   };
 
   return (
@@ -194,8 +298,8 @@ export default function App() {
               { id: 'details', label: 'Détails du Calcul', icon: Info },
               { id: 'guide', label: 'Mode d\'emploi', icon: GraduationCap },
               { id: 'settings', label: 'Paramètres', icon: Settings },
-              { id: 'admin', label: 'Tableau de Bord', icon: BarChart3 },
-            ].map(tab => (
+              { id: 'admin', label: 'Tableau de Bord', icon: BarChart3, requiresAuth: true },
+            ].filter(tab => !tab.requiresAuth || user).map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -212,21 +316,26 @@ export default function App() {
               </button>
             ))}
           </div>
+
+          {user && (
+            <div className="mt-4 px-4">
+              <button 
+                onClick={logout}
+                className="w-full flex items-center gap-4 px-4 py-2 rounded-xl text-red-500 hover:bg-red-50 transition-all font-semibold text-xs border border-transparent hover:border-red-100"
+              >
+                <div className="rotate-180"><ChevronRight size={16} /></div>
+                <span>Se déconnecter</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="mt-auto p-6 space-y-3">
           <div className="px-2 pb-1">
-            <p className="text-[10px] text-slate-400 font-medium leading-tight">
-              Vos données sont conservées localement dans ce navigateur.
+            <p className="text-[10px] text-slate-400 font-medium leading-tight italic">
+              Les calculs sont automatiquement synchronisés avec le serveur pour le suivi pédagogique.
             </p>
           </div>
-          <button 
-            onClick={saveLocally}
-            className="w-full btn-secondary text-sm"
-          >
-            {saveStatus === 'saved' ? <CheckCircle2 size={18} className="text-ivory-green" /> : <Save size={18} />}
-            {saveStatus === 'saved' ? 'Données sauvegardées' : 'Sauvegarder'}
-          </button>
           <button 
             onClick={resetData}
             className="w-full btn-secondary text-sm text-red-500 border-red-100 hover:bg-red-50"
@@ -345,7 +454,7 @@ export default function App() {
               
               <div className="glass-card p-8 rounded-3xl grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">Nom(s) & Prénom(s)</label>
+                  <label className="text-sm font-semibold text-slate-600">Nom(s) & Prénom(s) <span className="text-red-500">*</span></label>
                   <input 
                     type="text" 
                     className="input-field" 
@@ -355,14 +464,19 @@ export default function App() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">Matricule</label>
+                  <label className="text-sm font-semibold text-slate-600">Matricule <span className="text-red-500">*</span></label>
                   <input 
                     type="text" 
-                    className="input-field" 
-                    placeholder="Ex: 21B0001X"
+                    className={`input-field ${state.info.matricule && !isMatriculeValid(state.info.matricule) ? 'border-red-300 bg-red-50' : ''}`} 
+                    placeholder="Ex: 21B0001X (8 chiffres + 1 lettre)"
                     value={state.info.matricule}
-                    onChange={(e) => updateInfo('matricule', e.target.value)}
+                    onChange={(e) => updateInfo('matricule', e.target.value.replace(/\s/g, '').toUpperCase())}
                   />
+                  {state.info.matricule && !isMatriculeValid(state.info.matricule) && (
+                    <p className="text-[10px] font-bold text-red-500 animate-in fade-in slide-in-from-top-1">
+                      Le matricule doit comporter exactement 8 chiffres suivis d'une lettre (ex: 21000001X).
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-600">Établissement</label>
@@ -375,7 +489,7 @@ export default function App() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-600">MGA Annuelle</label>
+                  <label className="text-sm font-semibold text-slate-600">MGA Annuelle <span className="text-red-500">*</span></label>
                   <input 
                     type="number" 
                     step="0.01"
@@ -425,8 +539,14 @@ export default function App() {
 
               <div className="flex justify-end pt-4">
                 <button 
-                  onClick={() => setActiveTab('notes')}
-                  className="btn-primary"
+                  onClick={() => {
+                    if (!isMatriculeValid(state.info.matricule)) {
+                      alert("Veuillez saisir un matricule valide (8 chiffres suivis d'une lettre) avant de continuer.");
+                      return;
+                    }
+                    setActiveTab('notes');
+                  }}
+                  className={`btn-primary ${!isMatriculeValid(state.info.matricule) ? 'opacity-50 grayscale' : ''}`}
                 >
                   Suivant: Saisie des notes
                   <ChevronRight size={20} />
@@ -526,7 +646,7 @@ export default function App() {
                   Retour
                 </button>
                 <button 
-                  onClick={() => setActiveTab('results')}
+                  onClick={handleCalculate}
                   className="btn-primary"
                 >
                   Calculer les résultats
@@ -543,6 +663,43 @@ export default function App() {
               animate={{ opacity: 1, scale: 1 }}
               className="max-w-4xl mx-auto space-y-8"
             >
+              {results && submissionConflict && (
+                <div className="glass-card border-orange-200 bg-orange-50/50 p-6 rounded-3xl mb-8 animate-in zoom-in-95 duration-300">
+                  <div className="flex items-start gap-4">
+                    <div className="p-3 bg-ivory-orange text-white rounded-2xl shrink-0">
+                      <AlertCircle size={24} />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <h4 className="font-bold text-slate-800">Enregistrement existant</h4>
+                      <p className="text-sm text-slate-600 leading-relaxed">
+                        Un enregistrement avec le matricule <strong className="text-ivory-orange">{submissionConflict.matricule}</strong> existe déjà dans la base de données. 
+                        Souhaitez-vous écraser les anciennes données avec vos nouveaux résultats ?
+                      </p>
+                      <div className="flex gap-3 pt-3">
+                        <button 
+                          onClick={handleForceSubmit}
+                          disabled={isSubmitting}
+                          className="px-4 py-2 bg-ivory-orange text-white rounded-xl text-xs font-bold shadow-lg shadow-orange-500/20 hover:scale-105 transition-all disabled:opacity-50"
+                        >
+                          Oui, écraser et enregistrer
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setSubmissionConflict(null);
+                            setIsSubmitting(true); // Bloquer d'autres tentatives pour cette session
+                            const currentId = `${state.info.nom}-${state.info.matricule}-${results.mo.toFixed(2)}`;
+                            sessionStorage.setItem('last_submitted_id', currentId);
+                          }}
+                          className="px-4 py-2 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all"
+                        >
+                          Non, ignorer
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {!results ? (
                 <div className="glass-card p-12 rounded-3xl flex flex-col items-center justify-center text-center space-y-4">
                   <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center">
@@ -788,7 +945,7 @@ export default function App() {
                 </div>
                 <h3 className="text-2xl font-bold text-slate-800">Données & Statistiques</h3>
               </div>
-              <StatsDashboard />
+              <StatsDashboard user={user} />
             </motion.div>
           )}
 
@@ -803,87 +960,188 @@ export default function App() {
                 <div className="p-3 bg-slate-100 text-slate-500 rounded-2xl">
                   <Settings size={24} />
                 </div>
-                <h3 className="text-2xl font-bold text-slate-800">Paramètres des Seuils</h3>
+                <h3 className="text-2xl font-bold text-slate-800">Paramètres & Administration</h3>
               </div>
 
               <div className="glass-card p-8 rounded-3xl space-y-8">
-                <div className="space-y-6">
-                  <h4 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                    <GraduationCap size={18} className="text-ivory-orange" />
-                    Orientation Public
+                {/* Admin Auth Section */}
+                <section className="space-y-4">
+                  <h4 className="font-bold text-slate-800 flex items-center gap-2">
+                    <User size={18} className="text-ivory-orange" />
+                    Accès Administration
                   </h4>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center gap-8">
-                      <div className="space-y-1">
-                        <label className="text-sm font-semibold text-slate-600">MO Minimale Requise</label>
-                        <p className="text-xs text-slate-400">Le seuil standard est fixé à 10.00/20.</p>
+                  <p className="text-sm text-slate-500 italic">
+                    Cette section est réservée à la Direction du Collège Kirmann pour consulter les statistiques globales.
+                  </p>
+                  
+                  {user ? (
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {user.photoURL ? (
+                          <img 
+                            src={user.photoURL} 
+                            alt="avatar" 
+                            className="w-10 h-10 rounded-full border border-white shadow-sm"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-ivory-orange text-white flex items-center justify-center font-bold">
+                            {user.email?.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">{user.displayName || user.email?.split('@')[0]}</p>
+                          <p className="text-xs text-slate-500">{user.email}</p>
+                          {isAdmin ? (
+                            <span className="text-[10px] font-bold text-ivory-green uppercase tracking-widest bg-green-50 px-1.5 py-0.5 rounded mt-1 inline-block">Directeur / Admin</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-1.5 py-0.5 rounded mt-1 inline-block">Collaborateur</span>
+                          )}
+                        </div>
                       </div>
-                      <input 
-                        type="number" 
-                        step="0.01" 
-                        className="input-field w-32 text-center font-bold"
-                        value={state.thresholds.moMinimale}
-                        onChange={(e) => updateThreshold('moMinimale', parseFloat(e.target.value))}
-                      />
+                      <button onClick={logout} className="text-xs font-bold text-red-500 hover:underline">Déconnexion</button>
                     </div>
-                  </div>
-                </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {authError && (
+                        <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium flex items-center gap-2">
+                          <AlertCircle size={14} />
+                          {authError}
+                        </div>
+                      )}
+                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+                        <div className="space-y-4">
+                          <input 
+                            type="email" 
+                            placeholder="Email" 
+                            className="input-field text-sm"
+                            value={adminEmail}
+                            onChange={(e) => setAdminEmail(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                          />
+                          <input 
+                            type="password" 
+                            placeholder="Mot de passe" 
+                            className="input-field text-sm"
+                            value={adminPass}
+                            onChange={(e) => setAdminPass(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                          />
+                          <button 
+                            onClick={handleAdminLogin}
+                            className="w-full btn-primary text-sm py-2"
+                          >
+                            Se connecter
+                          </button>
+                        </div>
+                        
+                        {adminEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase() && adminPass === '2026' && (
+                          <>
+                            <div className="relative">
+                              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                              <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-50 px-2 text-slate-400">ou</span></div>
+                            </div>
 
-                <div className="space-y-6">
-                  <h4 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
-                    <CheckCircle2 size={18} className="text-ivory-green" />
-                    Admission au Privé
-                  </h4>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center gap-8">
-                      <div className="space-y-1">
-                        <label className="text-sm font-semibold text-slate-600">MGA Minimale</label>
-                        <p className="text-xs text-slate-400">Moyenne Générale Annuelle minimale.</p>
-                      </div>
-                      <input 
-                        type="number" 
-                        step="0.01" 
-                        className="input-field w-32 text-center font-bold"
-                        value={state.thresholds.mgaPriveMin}
-                        onChange={(e) => updateThreshold('mgaPriveMin', parseFloat(e.target.value))}
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <label className="text-sm font-semibold text-slate-600">MO Min Privé</label>
-                        <input 
-                          type="number" 
-                          step="0.01" 
-                          className="input-field text-center font-bold"
-                          value={state.thresholds.moPriveMin}
-                          onChange={(e) => updateThreshold('moPriveMin', parseFloat(e.target.value))}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-sm font-semibold text-slate-600">MO Max Privé</label>
-                        <input 
-                          type="number" 
-                          step="0.01" 
-                          className="input-field text-center font-bold"
-                          value={state.thresholds.moPriveMax}
-                          onChange={(e) => updateThreshold('moPriveMax', parseFloat(e.target.value))}
-                        />
+                            <button 
+                              onClick={async () => {
+                                setAuthError(null);
+                                await signInWithGoogle();
+                              }}
+                              className="w-full flex items-center justify-center gap-3 p-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors font-bold text-slate-700 text-sm animate-in fade-in slide-in-from-top-2 duration-300"
+                            >
+                              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+                              Se connecter avec Google (Admin)
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
-                  </div>
-                </div>
+                  )}
+                </section>
 
-                <div className="pt-6 border-t flex justify-end">
-                   <button 
-                     onClick={() => {
-                       setState(prev => ({ ...prev, thresholds: DEFAULT_THRESHOLDS }));
-                       alert('Seuils réinitialisés aux valeurs par défaut.');
-                     }}
-                     className="text-sm font-bold text-ivory-orange hover:underline"
-                   >
-                     Restaurer les valeurs par défaut
-                   </button>
-                </div>
+                  {user && (
+                    <>
+                      <div className="h-px bg-slate-100"></div>
+
+                      <div className="space-y-6">
+                        <h4 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                          <GraduationCap size={18} className="text-ivory-orange" />
+                          Orientation Public
+                        </h4>
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center gap-8">
+                            <div className="space-y-1">
+                              <label className="text-sm font-semibold text-slate-600">MO Minimale Requise</label>
+                              <p className="text-xs text-slate-400">Le seuil standard est fixé à 10.00/20.</p>
+                            </div>
+                            <input 
+                              type="number" 
+                              step="0.01" 
+                              className="input-field w-32 text-center font-bold"
+                              value={state.thresholds.moMinimale}
+                              onChange={(e) => updateThreshold('moMinimale', parseFloat(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-6">
+                        <h4 className="font-bold text-slate-800 flex items-center gap-2 border-b pb-2">
+                          <CheckCircle2 size={18} className="text-ivory-green" />
+                          Admission au Privé
+                        </h4>
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-center gap-8">
+                            <div className="space-y-1">
+                              <label className="text-sm font-semibold text-slate-600">MGA Minimale</label>
+                              <p className="text-xs text-slate-400">Moyenne Générale Annuelle minimale.</p>
+                            </div>
+                            <input 
+                              type="number" 
+                              step="0.01" 
+                              className="input-field w-32 text-center font-bold"
+                              value={state.thresholds.mgaPriveMin}
+                              onChange={(e) => updateThreshold('mgaPriveMin', parseFloat(e.target.value))}
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                              <label className="text-sm font-semibold text-slate-600">MO Min Privé</label>
+                              <input 
+                                type="number" 
+                                step="0.01" 
+                                className="input-field text-center font-bold"
+                                value={state.thresholds.moPriveMin}
+                                onChange={(e) => updateThreshold('moPriveMin', parseFloat(e.target.value))}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-sm font-semibold text-slate-600">MO Max Privé</label>
+                              <input 
+                                type="number" 
+                                step="0.01" 
+                                className="input-field text-center font-bold"
+                                value={state.thresholds.moPriveMax}
+                                onChange={(e) => updateThreshold('moPriveMax', parseFloat(e.target.value))}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-6 border-t flex justify-end">
+                         <button 
+                           onClick={() => {
+                             setState(prev => ({ ...prev, thresholds: DEFAULT_THRESHOLDS }));
+                             alert('Seuils réinitialisés aux valeurs par défaut.');
+                           }}
+                           className="text-sm font-bold text-ivory-orange hover:underline"
+                         >
+                           Restaurer les valeurs par défaut
+                         </button>
+                      </div>
+                    </>
+                  )}
               </div>
             </motion.div>
           )}

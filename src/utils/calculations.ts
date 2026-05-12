@@ -10,7 +10,11 @@ export function isDataComplete(state: any): boolean {
   const { info, notes } = state;
   
   // Check info
-  if (!info.nom || !info.mgaAnnuelle) return false;
+  if (!info.nom || !info.matricule || !info.mgaAnnuelle) return false;
+
+  // Strict matricule validation: 8 digits + 1 letter
+  const isValidMatricule = /^[0-9]{8}[a-zA-Z]$/.test(info.matricule.trim());
+  if (!isValidMatricule) return false;
 
   // Check subjects used for MO
   const moSubjects = ['francais', 'maths', 'pc', 'anglais'];

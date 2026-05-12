@@ -1,8 +1,10 @@
 {
-  "apiKey": "",
-  "authDomain": "",
-  "projectId": "",
-  "storageBucket": "",
-  "messagingSenderId": "",
-  "appId": ""
+  "projectId": "orientation-kirmann",
+  "appId": "1:686377578323:web:d8280e8ccfc6b0dfb6fba6",
+  "apiKey": "AIzaSyB1l_YawbLJMimc-rX2ch8AeCHxr3wv4hQ",
+  "authDomain": "orientation-kirmann.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-e8fb2f68-adb0-4b0f-a2b1-8322c15a3650",
+  "storageBucket": "orientation-kirmann.firebasestorage.app",
+  "messagingSenderId": "686377578323",
+  "measurementId": ""
 }
