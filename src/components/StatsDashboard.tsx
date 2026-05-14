@@ -12,11 +12,12 @@ import {
   RefreshCw,
   Download,
   FileDown,
+  BookOpen,
   Trash2,
   Trash
 } from 'lucide-react';
 import { getDashboardStats, ADMIN_EMAIL, deleteSubmission, clearAllSubmissions } from '../services/firebaseService';
-import { generateStatsPDF } from '../utils/pdfGenerator';
+import { generateStatsPDF, generateGuidePDF } from '../utils/pdfGenerator';
 
 export default function StatsDashboard({ user }: { user?: any }) {
   const [stats, setStats] = useState<any>(null);
@@ -297,6 +298,15 @@ export default function StatsDashboard({ user }: { user?: any }) {
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
               <span className="hidden sm:inline">Actualiser la liste</span>
             </button>
+            <button 
+              onClick={generateGuidePDF}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-sm font-bold transition-all"
+              title="Télécharger le mode d'emploi"
+            >
+              <BookOpen size={16} />
+              <span className="hidden sm:inline">Guide & Mode d'emploi</span>
+            </button>
+
             <button 
               onClick={handleExportPDF}
               disabled={loading || !stats?.recent?.length || isExportingPDF}

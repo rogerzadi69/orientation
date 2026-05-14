@@ -37,7 +37,7 @@ import {
   calculateAnnualAverage, 
   isDataComplete 
 } from './utils/calculations';
-import { generateOrientationPDF } from './utils/pdfGenerator';
+import { generateOrientationPDF, generateGuidePDF } from './utils/pdfGenerator';
 import { 
   submitResult, 
   auth, 
@@ -50,7 +50,7 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import StatsDashboard from './components/StatsDashboard';
-import { FileDown } from 'lucide-react';
+import { FileDown, BookOpen } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -300,7 +300,7 @@ export default function App() {
               { id: 'notes', label: 'Notes Trimestrielles', icon: PenTool },
               { id: 'results', label: 'Résultats', icon: BarChart3 },
               { id: 'details', label: 'Détails du Calcul', icon: Info },
-              { id: 'guide', label: 'Mode d\'emploi', icon: GraduationCap },
+              { id: 'guide', label: 'Points Clés', icon: GraduationCap },
               { id: 'settings', label: 'Paramètres', icon: Settings },
               { id: 'admin', label: 'Tableau de Bord', icon: BarChart3, requiresAuth: true },
             ].filter(tab => !tab.requiresAuth || user).map(tab => (
@@ -319,6 +319,16 @@ export default function App() {
                 <span className="font-semibold text-sm">{tab.label}</span>
               </button>
             ))}
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-slate-100 space-y-2">
+            <button 
+              onClick={generateGuidePDF}
+              className="w-full flex items-center gap-4 px-4 py-3 rounded-xl bg-slate-800 text-white hover:bg-slate-900 transition-all shadow-lg shadow-slate-200"
+            >
+              <FileDown size={20} />
+              <span className="font-bold text-sm text-left">Télécharger Guide (.pdf)</span>
+            </button>
           </div>
 
           {user && (
@@ -899,7 +909,7 @@ export default function App() {
                        Saisie des Informations
                     </h4>
                     <p className="text-slate-600 text-sm leading-relaxed">
-                      Allez dans l'onglet <strong>"Espace Élève"</strong>. Remplissez votre nom, matricule et établissement. 
+                      Allez dans l'onglet <strong>"Espace Élève"</strong>. Remplissez votre nom, matricule, établissement et votre <strong>Moyenne Générale Annuelle (MGA)</strong>. 
                       Précisez si vous êtes un <strong>Candidat Normal</strong> ou <strong>Candidat TO</strong> (Test d'Orientation). 
                       Indiquez également si vous avez été admis au BEPC.
                     </p>
