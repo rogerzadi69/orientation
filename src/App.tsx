@@ -37,6 +37,7 @@ import {
   calculateAnnualAverage, 
   isDataComplete 
 } from './utils/calculations';
+import { generateOrientationPDF } from './utils/pdfGenerator';
 import { 
   submitResult, 
   auth, 
@@ -49,6 +50,7 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import StatsDashboard from './components/StatsDashboard';
+import { FileDown } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -179,6 +181,8 @@ export default function App() {
         anneeScolaire: state.info.anneeScolaire,
         mo: results.mo,
         serie: results.serie,
+        bilanLettres: results.bilanLettres,
+        bilanSciences: results.bilanSciences,
         admissiblePublic: results.admisibleOfficiel,
         admissiblePrive: results.admissiblePrive,
       };
@@ -776,10 +780,17 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex justify-center pt-4">
+                  <div className="flex flex-wrap justify-center gap-4 pt-4">
                     <button onClick={() => setActiveTab('details')} className="btn-secondary">
                       <Info size={20} />
                       Voir les détails des calculs
+                    </button>
+                    <button 
+                      onClick={() => generateOrientationPDF(state, results)} 
+                      className="btn-primary bg-ivory-green hover:bg-green-600 shadow-green-500/20"
+                    >
+                      <FileDown size={20} />
+                      Télécharger le PDF
                     </button>
                   </div>
                 </>
@@ -806,49 +817,61 @@ export default function App() {
                    <p className="text-slate-500">Veuillez d'abord compléter vos notes.</p>
                  </div>
               ) : (
-                <div className="overflow-x-auto glass-card rounded-3xl">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50/50 border-b border-slate-100">
-                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Matière</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Moy. Ann. Ponderée</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Note BEPC</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Total Pondéré</th>
-                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Coef</th>
-                        <th className="px-6 py-4 text-xs font-bold text-ivory-orange uppercase text-right">Contribution</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {Object.keys(results.subResults).map(key => {
-                        const res = results.subResults[key];
-                        if (!res) return null;
-                        const isMain = ['francais', 'maths', 'pc', 'anglais'].includes(key);
-                        
-                        return (
-                          <tr key={key} className={`hover:bg-slate-50/30 transition-colors ${!isMain ? 'opacity-60 grayscale' : ''}`}>
-                            <td className="px-6 py-4">
-                              <span className="font-bold text-slate-800">{SUBJECT_LABELS[key]}</span>
-                              {!isMain && <span className="ml-2 text-[8px] bg-slate-200 px-1 rounded text-slate-500">HORS MO</span>}
-                            </td>
-                            <td className="px-6 py-4 text-center font-mono text-sm">{res.ann.toFixed(2)}</td>
-                            <td className="px-6 py-4 text-center font-mono text-sm">{res.bepc.toFixed(2)}</td>
-                            <td className="px-6 py-4 text-center font-mono text-sm font-bold">{res.totalPondere.toFixed(2)}</td>
-                            <td className="px-6 py-4 text-center font-mono text-sm">{res.coef}</td>
-                            <td className="px-6 py-4 text-right font-mono text-sm font-black text-ivory-orange">{res.contribution.toFixed(2)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-orange-50/30 border-t-2 border-ivory-orange/20">
-                        <td colSpan={4} className="px-6 py-4 text-right font-bold text-slate-600">Somme des notes coefficientées (MO)</td>
-                        <td className="px-6 py-4 text-center font-black text-slate-800">12</td>
-                        <td className="px-6 py-4 text-right font-black text-2xl text-ivory-orange">
-                          {((results.mo * 12)).toFixed(2)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                <div className="space-y-6">
+                  <div className="overflow-x-auto glass-card rounded-3xl">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50/50 border-b border-slate-100">
+                          <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase">Matière</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Moy. Ann. Ponderée</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Note BEPC</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Total Pondéré</th>
+                          <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase text-center">Coef</th>
+                          <th className="px-6 py-4 text-xs font-bold text-ivory-orange uppercase text-right">Contribution</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {Object.keys(results.subResults).map(key => {
+                          const res = results.subResults[key];
+                          if (!res) return null;
+                          const isMain = ['francais', 'maths', 'pc', 'anglais'].includes(key);
+                          
+                          return (
+                            <tr key={key} className={`hover:bg-slate-50/30 transition-colors ${!isMain ? 'opacity-60 grayscale' : ''}`}>
+                              <td className="px-6 py-4">
+                                <span className="font-bold text-slate-800">{SUBJECT_LABELS[key]}</span>
+                                {!isMain && <span className="ml-2 text-[8px] bg-slate-200 px-1 rounded text-slate-500">HORS MO</span>}
+                              </td>
+                              <td className="px-6 py-4 text-center font-mono text-sm">{res.ann.toFixed(2)}</td>
+                              <td className="px-6 py-4 text-center font-mono text-sm">{res.bepc.toFixed(2)}</td>
+                              <td className="px-6 py-4 text-center font-mono text-sm font-bold">{res.totalPondere.toFixed(2)}</td>
+                              <td className="px-6 py-4 text-center font-mono text-sm">{res.coef}</td>
+                              <td className="px-6 py-4 text-right font-mono text-sm font-black text-ivory-orange">{res.contribution.toFixed(2)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-orange-50/30 border-t-2 border-ivory-orange/20">
+                          <td colSpan={4} className="px-6 py-4 text-right font-bold text-slate-600">Somme des notes coefficientées (MO)</td>
+                          <td className="px-6 py-4 text-center font-black text-slate-800">12</td>
+                          <td className="px-6 py-4 text-right font-black text-2xl text-ivory-orange">
+                            {((results.mo * 12)).toFixed(2)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  <div className="flex justify-center mt-6">
+                    <button 
+                      onClick={() => generateOrientationPDF(state, results)} 
+                      className="btn-primary bg-ivory-green hover:bg-green-600 shadow-green-500/20"
+                    >
+                      <FileDown size={20} />
+                      Télécharger mon rapport complet (PDF)
+                    </button>
+                  </div>
                 </div>
               )}
             </motion.div>
@@ -1011,49 +1034,35 @@ export default function App() {
                       )}
                       <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
                         <div className="space-y-4">
-                          <input 
-                            type="email" 
-                            placeholder="Email" 
-                            className="input-field text-sm"
-                            value={adminEmail}
-                            onChange={(e) => setAdminEmail(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-                          />
-                          <input 
-                            type="password" 
-                            placeholder="Mot de passe" 
-                            className="input-field text-sm"
-                            value={adminPass}
-                            onChange={(e) => setAdminPass(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-                          />
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Identifiant (Email)</label>
+                            <input 
+                              type="email" 
+                              placeholder="Votre email professionnel" 
+                              className="input-field text-sm"
+                              value={adminEmail}
+                              onChange={(e) => setAdminEmail(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1">Mot de passe</label>
+                            <input 
+                              type="password" 
+                              placeholder="Votre mot de passe" 
+                              className="input-field text-sm"
+                              value={adminPass}
+                              onChange={(e) => setAdminPass(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
+                            />
+                          </div>
                           <button 
                             onClick={handleAdminLogin}
-                            className="w-full btn-primary text-sm py-2"
+                            className="w-full btn-primary text-sm py-3 shadow-lg shadow-orange-500/20"
                           >
-                            Se connecter
+                            Se connecter à l'Administration
                           </button>
                         </div>
-                        
-                        {adminEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase() && adminPass === '2026' && (
-                          <>
-                            <div className="relative">
-                              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                              <div className="relative flex justify-center text-xs uppercase"><span className="bg-slate-50 px-2 text-slate-400">ou</span></div>
-                            </div>
-
-                            <button 
-                              onClick={async () => {
-                                setAuthError(null);
-                                await signInWithGoogle();
-                              }}
-                              className="w-full flex items-center justify-center gap-3 p-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors font-bold text-slate-700 text-sm animate-in fade-in slide-in-from-top-2 duration-300"
-                            >
-                              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
-                              Se connecter avec Google (Admin)
-                            </button>
-                          </>
-                        )}
                       </div>
                     </div>
                   )}

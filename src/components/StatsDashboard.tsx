@@ -11,10 +11,12 @@ import {
   RotateCcw,
   RefreshCw,
   Download,
+  FileDown,
   Trash2,
   Trash
 } from 'lucide-react';
 import { getDashboardStats, ADMIN_EMAIL, deleteSubmission, clearAllSubmissions } from '../services/firebaseService';
+import { generateStatsPDF } from '../utils/pdfGenerator';
 
 export default function StatsDashboard({ user }: { user?: any }) {
   const [stats, setStats] = useState<any>(null);
@@ -22,6 +24,7 @@ export default function StatsDashboard({ user }: { user?: any }) {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   const [debugInfo, setDebugInfo] = useState<string>('');
 
@@ -115,6 +118,16 @@ export default function StatsDashboard({ user }: { user?: any }) {
     } finally {
       setIsClearing(false);
       setShowClearConfirm(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    if (!stats?.recent?.length) return;
+    setIsExportingPDF(true);
+    try {
+      generateStatsPDF(stats.recent);
+    } finally {
+      setIsExportingPDF(false);
     }
   };
 
@@ -284,6 +297,16 @@ export default function StatsDashboard({ user }: { user?: any }) {
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
               <span className="hidden sm:inline">Actualiser la liste</span>
             </button>
+            <button 
+              onClick={handleExportPDF}
+              disabled={loading || !stats?.recent?.length || isExportingPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-ivory-orange/10 hover:bg-ivory-orange/20 text-ivory-orange rounded-xl text-sm font-bold transition-all disabled:opacity-50"
+              title="Exporter toutes les données en PDF"
+            >
+              <FileDown size={16} />
+              <span className="hidden sm:inline">{isExportingPDF ? 'Exportation...' : 'Exporter PDF'}</span>
+            </button>
+
             <button 
               onClick={exportToExcel}
               disabled={isExporting || !stats?.recent?.length}
